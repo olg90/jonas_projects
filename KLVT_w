@@ -1,0 +1,339 @@
+#%% Define the functions for fitting
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+
+def simulate(vth, c, ci, f, fi, pr, pri, M, Mi, wmax, whyp,wpol, tauw, tauv, tmax, delta_t, navgs):
+    
+    tavgs=[]
+    cavgs=[]
+
+    for _ in range(navgs):
+
+        vlist=[]
+        wlist=[]
+        tlist=[]
+        prelist=[]
+        postlist=[]
+        
+        tcurr=0
+        ratio = 0#.3
+        timer = delta_t
+        e=1e-6
+        v=0
+        w=wpol
+        while tcurr < tmax:
+            t0=exponential(1/(f+e)) # action potential
+            t1=exponential(1/(fi+e))
+            t2 = timer
+
+            if t0 < t1 and t0 < t2: # AP occurrs
+                b = binomial(M, pr)
+                v=v+c*(1-w)*b
+                tmin = t0
+                timer-=tmin
+                prelist.append(tcurr+tmin)
+    
+            elif t1<t0 and t1<t2: # an inhibition event occurs
+
+                bi = binomial(Mi, pri)
+                v=v-ci*bi
+                tmin = t1
+                timer-=tmin
+
+            else:
+                tmin=t2
+                timer = delta_t
+                if tcurr >= ratio*tmax:
+                    vlist.append(v)
+                    wlist.append(w)
+                    tlist.append(tcurr)
+                    
+            tcurr += tmin
+            if v>=vth:
+                postlist.append(tcurr)
+                v=0
+                if len(vlist)>0:
+                    vlist[-1]=vth+0.01
+
+            # Update the continuous dynamics
+
+            v += (-v / tauv) * tmin
+            w += (wmax(v, whyp, wpol)-w)/tauw*tmin
+    
+        Tlist = np.diff(postlist)
+        Tmean = np.mean(Tlist)
+        CVT2=np.var(Tlist)/Tmean**2
+        
+        tavgs.append(Tmean)
+        cavgs.append(CVT2)
+    Tmean = np.mean(tavgs)
+    CVT2 = np.mean(cavgs)
+    return tlist, vlist, wlist, prelist, postlist, Tmean, CVT2
+
+def wmax(v, whyp, wpol):
+    if v<0:
+        return whyp
+    else:
+        return wpol
+    
+def getfout(filist, ninhnum, ninh, vth, c, ci, f, fi, pr, pri, M, Mi, wmax, whyp, wpol, tauw, tauv, tmax, delta_t, navgs):
+    foutlist=[]
+    for i,fi in enumerate(filist):
+        print(i, len(filist))
+        res=simulate(vth, c, ci/ninh[ninhnum], f, fi*ninh[ninhnum], pr, pri, M, Mi, wmax, whyp, wpol, tauw, tauv, tmax, delta_t, navgs)
+        foutlist.append(1/res[5])
+    return foutlist
+# --------------------------------------------------------------------
+
+# Load the entire Excel file
+file_path = r"C:\Users\ogamb\OneDrive\Desktop\Research\current_project\postinhibitory_facilitation\allcellscopy.xlsx"  # Change this to your actual path
+# Read all data into a dictionary
+data = pd.read_excel(file_path, sheet_name=None, header=None)
+# # Print all sheet names
+# print("data found:", list(data.keys()))
+# # Loop through data and preview first few rows
+# for sheet_name, df in data.items():
+#     print(f"\n--- Sheet: {sheet_name} ---")
+
+names = ['Summary', '240425_E4', '240425_E5', '240425_E6', 
+         '240426_E2', '240426_E3', '240426_E5', '240515_E2', 
+         '240516_E2', '240516_E7']
+d=data[names[0]]
+# rates = d.iloc[:, 0][:8]
+excnum=2 # #0=exc weight 10, #1=exc weight 4, #2=exc weight 1
+d1=d.iloc[1:, -3:][7*excnum:7*(excnum+1)] # Mean sustained rate
+# susrates=[d.iloc[1:, -3:][7*i:7*(i+1)] for i in range(3)]
+# plt.plot(rates, d1.iloc[:,2], marker='o') # 0 = 8 nS/input, 1 = 4 nS/input, 2 = 2 nS/input 
+# 0 = 8 nS/input, 1 = 4 nS/input, 2 = 2 nS/input 
+estrengths=[10,4,1]
+istrengths=[8,4,2]
+# -----------------------------------------------------------------------------
+nexcnum=0
+nexc=[4,10,12]
+
+ninhnum=0
+ninh=[2,4,8] #1,4,5
+
+
+f=300*nexc[nexcnum] # excitatory frequency
+fi=10
+pr=0.5
+pri=0.2
+M=100
+Mi=100
+c=0.0007
+ci=0.008 # /ninh[ninhnum] # 0.0023 # increasing inh strength brings rightmost point downwards
+
+whyp=0 # % strength reduction due to KLVT when hyperpolarized
+wpol=0.7 # % reduction due to KLVT when polarized
+tauw=0.1 #0.1 # decay rate of w
+
+tauv=0.01
+vth=0.2 # Threshold value
+
+tmax = 20 # <-------------- TMAX
+delta_t = 0.001
+navgs = 10
+
+ttype=10
+
+# =============================================================================
+# # plot vmem and w
+# plt.subplot(2,1,1)
+# tlist, vlist, wlist, prelist, postlist, Tmean, CVT2 = simulate(vth, c, ci, f, fi, pr, pri, M, Mi, wmax, whyp, wpol, tauw, tauv, tmax, delta_t, navgs)
+# plt.plot(tlist, vlist, label=r'$v_m$')
+# plt.plot(tlist, vth*np.ones(len(tlist)), label='vth', color='k')
+# plt.plot(tlist, 0*np.ones(len(tlist)), label='v0', color='gray', linestyle='--')
+# plt.legend(loc='upper right')
+# plt.ylabel('Volts')
+# plt.xticks([])
+# plt.subplot(2,1,2)
+# plt.plot(tlist, wlist, label='w')
+# plt.legend(loc='upper right')
+# plt.xlabel('Time')
+# plt.ylabel('KLVT reduction strength')
+# plt.show()
+# #%% 
+# =============================================================================
+
+fs=15
+cs = [
+    "#1f77b4",  # blue
+    "#ff7f0e",  # orange
+    "#2ca02c",  # green
+]
+
+if ttype==1:
+    # Testing one at a time
+    filist=filist=[0,50,100,150,200,250,300]
+    fout = getfout(filist, ninhnum, ninh, vth, c, ci, f, fi, pr, pri, M, Mi, 
+                   wmax, whyp, wpol, tauw, tauv, tmax, delta_t, navgs)
+    plt.plot(filist, fout, color='k', marker='o', linestyle='--')
+    for i in range(3):
+        plt.plot(filist, d1.iloc[:,i], marker='o', 
+                 label='exc={}, inh={}'.format(estrengths[excnum], istrengths[i]),
+                 color=cs[i], markerfacecolor='none')
+    plt.ylabel('Steady state mean firing rate', fontsize=fs)
+    plt.xlabel('Inhibitory neuron frequency', fontsize=fs)
+    plt.tick_params(axis='both', labelsize=fs)
+    plt.legend(fontsize=fs-3)
+    plt.show()
+
+if ttype==10:
+    # Plot all three
+    filist=filist=[0,50,100,150,200,250,300]
+    fouts=[getfout(filist, ninhnum, ninh, vth, c, ci, f, fi, pr, pri, M, Mi, 
+                   wmax, whyp, wpol, tauw, tauv, tmax, delta_t, navgs) for ninhnum in range(len(ninh))]
+    
+    for i in range(3):
+        print(i)
+        plt.plot(filist, fouts[i], color=cs[i], 
+                    marker='o', linestyle='--',  markerfacecolor='none')
+        plt.plot(filist, d1.iloc[:,i], marker='o', 
+                 label='exc={}, inh={}'.format(estrengths[excnum], istrengths[i]),
+                 color=cs[i])
+        if i==2:
+            plt.plot([], [], '', label='Simulations', color='k', markerfacecolor='none',
+                     marker='o', linestyle='--')
+    plt.ylabel('Steady state mean firing rate', fontsize=fs)
+    plt.xlabel('Inhibitory neuron frequency', fontsize=fs)
+    plt.tick_params(axis='both', labelsize=fs)
+    plt.legend(fontsize=fs-3)
+    plt.show()
+#%% Fout vs (ci and fi)
+
+f=20 # excitatory frequency
+fi=10
+pr=0.5
+pri=0.2
+M=100
+Mi=100
+# ci=0.004 # 0.0023 # increasing inh strength brings rightmost point downwards
+ci=0.004 # 0.0023 # increasing inh strength brings rightmost point downwards
+
+tauv=0.5
+
+#kw=0.25 for exc/inh=(1/2), 0.3 for exc/inh=(1/4), 0.5 for last
+kw=0.3 # 0.3 # decreasing lowers both peak and rightmost point
+tauw=0.07 #0.1 # decay rate of w
+wmax=0.1 #0.06
+tauwmax=1 #3 # decrease raises peak
+w0=0.003 # must be smaller than wmax
+
+vth=0.2 # Threshold value
+
+v=0
+w=0
+
+tmax = 100 # <-------------- TMAX
+delta_t = 0.001
+navgs = 10
+
+filist=np.linspace(0,400,20)
+cilist=np.linspace(0,0.01,20)
+# cilist=np.linspace(0,0.002,20)
+foutlist=np.zeros((len(filist), len(cilist)))
+cv2list=np.zeros_like(foutlist)
+for i,fi in enumerate(filist):
+    for j,ci in enumerate(cilist):
+        print(i, len(filist), j, len(cilist))
+        res=simulate(v, w, vth, ci, f, fi, pr, pri, M, Mi, wmax, tauwmax, tauv, tauw, tmax, delta_t, navgs, w0)
+        foutlist[i,j]=1/res[5]
+        cv2list[i,j]=res[6]
+        #%%
+# Plot
+fs=15
+foutplot = np.clip(foutlist, 0, 20)
+plt.imshow(foutplot, extent=[cilist[0], cilist[-1], filist[0], filist[-1]],
+           aspect='auto', origin='lower')
+plt.ylabel(r'Inhibitory neuron frequency, $f_i$', fontsize=fs)
+plt.xlabel(r'Inhibition strength, $c_i$', fontsize=fs)
+plt.tick_params(axis='both', labelsize=fs)
+plt.colorbar()
+plt.title('Mean steady state firing rate', fontsize=fs)
+plt.show()
+#%%
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import math
+
+fs = 15
+foutplot = np.array(foutlist)  # Your data array
+
+# Define discrete levels (bin edges)
+levels = np.arange(0, 55, 5)  # 0, 5, 10, ..., 50
+cmap = plt.cm.viridis
+norm = mcolors.BoundaryNorm(boundaries=levels, ncolors=cmap.N)
+
+fig, ax = plt.subplots()
+
+# Show image with discrete colormap normalization
+im = ax.imshow(foutplot, extent=[cilist[0], cilist[-1], filist[0], filist[-1]],
+               aspect='auto', origin='lower', cmap=cmap, norm=norm)
+
+# Calculate pixel edge coordinates
+nrows, ncols = foutplot.shape
+x_edges = np.linspace(cilist[0], cilist[-1], ncols + 1)
+y_edges = np.linspace(filist[0], filist[-1], nrows + 1)
+
+# Loop through each cell and label with the ceiling integer value, ignoring NaNs
+for i in range(nrows):
+    for j in range(ncols):
+        val = foutplot[i, j]
+        if np.isnan(val):
+            continue  # skip NaN values to avoid errors
+        ceil_val = int(math.ceil(val))
+        x_center = 0.5 * (x_edges[j] + x_edges[j + 1])
+        y_center = 0.5 * (y_edges[i] + y_edges[i + 1])
+        ax.text(x_center, y_center, str(ceil_val),
+                ha='center', va='center', color='white', fontsize=8)
+
+# Colorbar showing bins
+cbar = plt.colorbar(im, ticks=levels, boundaries=levels)
+cbar.ax.set_yticklabels([str(lv) for lv in levels])
+cbar.ax.tick_params(labelsize=fs)
+
+# Axis labels and title
+ax.set_ylabel(r'Inhibitory neuron frequency, $f_i$', fontsize=fs)
+ax.set_xlabel(r'Inhibition strength, $c_i$', fontsize=fs)
+ax.tick_params(axis='both', labelsize=fs)
+ax.set_title('Mean steady state firing rate', fontsize=fs)
+
+plt.show()
+
+#%%
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+
+fs = 15
+foutplot = np.array(foutlist)
+
+# Define vmin, vmax, and center white at 20
+vmin = np.nanmin(foutplot)
+vmax = np.nanmax(foutplot)
+center = 20
+
+# Use TwoSlopeNorm to center white at 20 for bwr colormap
+norm = mcolors.TwoSlopeNorm(vmin=vmin, vcenter=center, vmax=vmax)
+
+fig, ax = plt.subplots()
+im = ax.imshow(foutplot, extent=[cilist[0], cilist[-1], filist[0], filist[-1]],
+               aspect='auto', origin='lower', cmap='bwr', norm=norm)
+
+cbar = plt.colorbar(im)
+cbar.ax.tick_params(labelsize=fs)
+
+ax.set_ylabel(r'Inhibitory neuron frequency, $f_i$', fontsize=fs)
+ax.set_xlabel(r'Inhibition strength, $c_i$', fontsize=fs)
+ax.tick_params(axis='both', labelsize=fs)
+ax.set_title('Mean steady state firing rate', fontsize=fs)
+
+plt.show()
