@@ -1,0 +1,356 @@
+#%% Define the functions for fitting
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+
+def simulate(vthpos, vthneg, vthrate, tauvth, vcenter, c, ci, f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs):
+    
+    tavgs=[]
+    cavgs=[]
+
+    for _ in range(navgs):
+
+        vlist=[]
+        vthlist=[]
+        tlist=[]
+        prelist=[]
+        postlist=[]
+        
+        v=0
+        vth=vthpos
+        tcurr=0
+        ratio = 0.3
+        timer = delta_t
+        e=1e-6
+        while tcurr < tmax:
+            t0=exponential(1/(f+e)) # action potential
+            t1=exponential(1/(fi+e))
+            t2 = timer
+
+            if t0 < t1 and t0 < t2: # AP occurrs
+                b = binomial(M, pr)
+                v=v+c*b
+                tmin = t0
+                timer-=tmin
+                prelist.append(tcurr+tmin)
+    
+            elif t1<t0 and t1<t2: # an inhibition event occurs
+
+                bi = binomial(Mi, pri)
+                v=v-ci*bi
+                tmin = t1
+                timer-=tmin
+
+            else:
+                tmin=t2
+                timer = delta_t
+                if tcurr >= ratio*tmax:
+                    vlist.append(v)
+                    vthlist.append(vth)
+                    tlist.append(tcurr)
+                    
+            tcurr += tmin
+            if v>vth:
+                postlist.append(tcurr)
+                v=0
+                if len(vlist)>0:
+                    vlist[-1]=vth+0.0005
+
+            # Update the continuous dynamics
+            v += (-v / tauv) * tmin
+            vth += (vthmax(v, vthpos, vthneg, vthrate, vcenter)-vth)/tauvth * tmin
+    
+        Tlist = np.diff(postlist)
+        Tmean = np.mean(Tlist)
+        CVT2=np.var(Tlist)/Tmean**2
+        
+        tavgs.append(Tmean)
+        cavgs.append(CVT2)
+    Tmean = np.mean(tavgs)
+    CVT2 = np.mean(cavgs)
+    return tlist, vlist, vthlist, prelist, postlist, Tmean, CVT2
+        
+# =============================================================================
+# def vthmax(v, rate, vthpos, vthneg):
+#     if v>=0:
+#         return vthpos
+#     if v<0:
+#         return (vthpos-vthneg)*np.exp(rate*v)+vthneg
+# =============================================================================
+    
+def vthmax(v, vthpos, vthneg, vthrate, vcenter):
+    return vthneg + (vthpos - vthneg) / (1 + np.exp(-vthrate * (v - vcenter)))
+
+
+# =============================================================================
+# plt.plot(vthmax(np.linspace(-1,1, 100), 1, 0.2, 0.1));plt.show()
+# =============================================================================
+
+def getfout(vthpos, vthneg, vthrate, tauvth, vcenter, 
+             c, ci, f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs):
+
+    filist=[0,50,100,150,200,250,300]
+    ftlist=[]
+    for i,fi in enumerate(filist):
+        # print(i, len(filist))
+        res=simulate(vthpos, vthneg, vthrate, tauvth, vcenter, 
+                     c, ci, f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs)
+        ftlist.append(res[5])
+
+    tsim=np.array(ftlist)
+    return filist, 1/tsim
+
+# Load the entire Excel file
+file_path = r"C:\Users\ogamb\OneDrive\Desktop\Research\current_project\postinhibitory_facilitation\allcellscopy.xlsx"  # Change this to your actual path
+
+# Read all data into a dictionary
+data = pd.read_excel(file_path, sheet_name=None, header=None)
+
+# # Print all sheet names
+# print("data found:", list(data.keys()))
+
+# # Loop through data and preview first few rows
+# for sheet_name, df in data.items():
+#     print(f"\n--- Sheet: {sheet_name} ---")
+#     print(df.head())
+
+names = ['Summary', '240425_E4', '240425_E5', '240425_E6', 
+         '240426_E2', '240426_E3', '240426_E5', '240515_E2', 
+         '240516_E2', '240516_E7']
+
+d=data[names[0]]
+# rates = d.iloc[:, 0][:8]
+excnum=2 # #0=exc weight 10, #1=exc weight 4, #2=exc weight 1
+d1=d.iloc[1:, -3:][7*excnum:7*(excnum+1)] # Mean sustained rate
+# susrates=[d.iloc[1:, -3:][7*i:7*(i+1)] for i in range(3)]
+# plt.plot(rates, d1.iloc[:,2], marker='o') # 0 = 8 nS/input, 1 = 4 nS/input, 2 = 2 nS/input 
+
+# 0 = 8 nS/input, 1 = 4 nS/input, 2 = 2 nS/input 
+estrengths=[10,4,1]
+istrengths=[8,4,2]
+# =============================================================================
+# for i in range(3):
+#     plt.plot(filist, d1.iloc[:,i], marker='o', label='exc={}, inh={}'.format(estrengths[excnum], istrengths[i]))
+# plt.legend()
+# plt.show()
+# #%%
+# =============================================================================
+
+f=300 # excitatory frequency
+fi=150
+pr=0.2
+pri=0.2
+M=100
+Mi=100
+c=0.000137 # 0.0042
+# strongest 0.01,
+cinum=1
+cilist=[0.0006, 0.0004, 0.00002] # increasing inh strength brings rightmost point downwards
+# increasing ci move the peak to the left and down
+# the noise needs to decrease
+ci=cilist[cinum]
+tauv=0.01 # 0.5
+
+vthpos=0.02
+vthneg=0.0001
+vthrate=1000 # changing the rate changes the peak size which is good but I don't if it's biological
+# 1000 fits inh=8, 500 fits inh=4, 250 fits inh=2
+vcenter=-0.001 
+
+tauvth=0.01
+
+tmax = 10 # <-------------- TMAX
+delta_t = 0.001
+navgs = 1
+
+ptest=100
+
+
+filist, fout8 = getfout(vthpos, vthneg, vthrate, tauvth, vcenter, c, cilist[0], f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs)
+filist, fout4 = getfout(vthpos, vthneg, vthrate, tauvth, vcenter, c, cilist[1], f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs)
+filist, fout2 = getfout(vthpos, vthneg, vthrate, tauvth, vcenter, c, cilist[2], f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs)
+   
+
+
+if ptest==1:
+    tlist, vlist, vthlist, prelist, postlist, Tmean, CVT2 = simulate(vthpos, 
+                                vthneg, vthrate, tauvth, vcenter, 
+                                c, ci, f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs)
+    plt.plot(tlist, vlist, label=r'$v_m$')
+    plt.plot(tlist, vthlist, label='vth', color='k')
+    plt.plot(tlist, 0*np.ones(len(tlist)), label='v0', color='gray', linestyle='--')
+    plt.legend(loc='upper right')
+    plt.ylabel('Volts')
+    plt.xticks([])
+    plt.show()
+    print(1/Tmean)
+
+if ptest==10:
+
+    filist, fout = getfout(vthpos, vthneg, vthrate, tauvth, vcenter, c, ci, f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs)
+    
+    # plt.subplot(2,1,2)
+    for i in range(3):
+        plt.plot(filist, d1.iloc[:,i], marker='o', label='exc={}, inh={}'.format(estrengths[excnum], istrengths[i]))
+    fs=15
+    plt.plot(filist, fout, label='simulations', color='k', marker='o')
+    plt.ylabel('Steady state mean firing rate', fontsize=fs)
+    plt.xlabel('Inhibitory neuron frequency', fontsize=fs)
+    plt.tick_params(axis='both', labelsize=fs)
+    plt.legend(fontsize=fs-3)
+    plt.show()
+
+if ptest==100:
+
+    fouts=[]
+    for ci in cilist:
+        filist, fout = getfout(vthpos, vthneg, vthrate, tauvth, vcenter, c, ci, f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs)
+        fouts.append(fout)
+    
+    ms=['o', 'x', 's']
+    cs=['blue', 'orange', 'green']
+    for i,foutx in enumerate(fouts):
+        plt.plot(filist, foutx, label='simulations', marker='{}'.format(ms[i]),
+                 color=cs[i], linestyle='--')
+        
+    # plt.subplot(2,1,2)
+    for i in range(3):
+        plt.plot(filist, d1.iloc[:,i], marker='o', label='exc={}, inh={}'.format(estrengths[excnum], istrengths[i]))
+    fs=15
+    plt.ylabel('Steady state mean firing rate', fontsize=fs)
+    plt.xlabel('Inhibitory neuron frequency', fontsize=fs)
+    plt.tick_params(axis='both', labelsize=fs)
+    plt.legend(fontsize=fs-3)
+    plt.show()
+#%%  Modular progress bar
+from scipy.optimize import minimize
+from tqdm import tqdm
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- Global progress bar ---
+pbar = None
+
+# --- Define modular weighted MSE cost function ---
+def total_cost(Pflat, P, d1, filist, cilist, navgs, tmax, delta_t, weights=None):
+    """
+    Compute total weighted MSE across datasets and simulations.
+    Fully modular: uses P list and passes all parameters dynamically to getfout.
+    """
+    global pbar
+    if pbar is not None:
+        pbar.update(1)
+
+    # --- Build parameter dictionary ---
+    Pdict = {}
+    j = 0
+    for name, init, pmin, pmax, ptype in P:
+        if ptype == 'v':
+            Pdict[name] = Pflat[j]
+            j += 1
+        else:
+            Pdict[name] = init
+
+    # --- Compute simulations for each ci ---
+    fouts = []
+    for ci in cilist:
+        kwargs = Pdict.copy()
+        kwargs.update({'ci': ci, 'tmax': tmax, 'delta_t': delta_t, 'navgs': navgs})
+        _, fout = getfout(**kwargs)
+        fouts.append(fout)
+
+    # --- Compute weighted MSE ---
+    total_mse = 0
+    for i in range(len(cilist)):
+        sim = fouts[i]
+        data = d1.iloc[:, i].astype(float).values
+        w = weights[i] if weights is not None else np.ones_like(data)
+        total_mse += np.mean(w * (sim - data) ** 2)
+
+    return total_mse
+
+
+# --- Define parameters modularly ---
+# ['name', init_val, min_val, max_val, 'ptype']
+P = [
+    ['vthpos', 0.02, 0.001, 0.1, 'v'],
+    ['vthrate', 1000, 1, 5000, 'v'],
+    ['vcenter', -0.001, -0.1, -0.001, 'v'],
+    ['tauvth', 0.01, 0.001, 1, 'v'],
+    ['vthneg', 0.0001, -0.001, 0.001, 'v'],
+    ['c', c, None, None, 'f'],
+    ['f', f, None, None, 'f'],
+    ['fi', fi, None, None, 'f'],
+    ['pr', pr, None, None, 'f'],
+    ['pri', pri, None, None, 'f'],
+    ['M', M, None, None, 'f'],
+    ['Mi', Mi, None, None, 'f'],
+    ['tauv', tauv, None, None, 'f']
+]
+
+# --- Extract variable parameters for optimizer ---
+x0 = [init for name, init, pmin, pmax, ptype in P if ptype == 'v']
+bounds = [(pmin, pmax) for name, init, pmin, pmax, ptype in P if ptype == 'v']
+
+# --- Optional weights (1 for all data points by default) ---
+weights = [np.ones(len(d1)) for _ in range(len(cilist))]
+weights = [1, 10, 1]
+
+# --- Run optimization ---
+print("Starting optimization...\n")
+maxiter = 30
+est_calls = maxiter * (len(x0) + 1)
+pbar = tqdm(total=est_calls, desc="Optimization progress", ncols=100)
+
+res = minimize(
+    total_cost,
+    x0=x0,
+    args=(P, d1, filist, cilist, navgs, tmax, delta_t, weights),
+    bounds=bounds,
+    method='L-BFGS-B',
+    options={'disp': True, 'maxiter': maxiter}
+)
+pbar.close()
+
+# --- Report results ---
+print("\nOptimization complete.")
+print("Best parameters found:")
+j = 0
+for name, init, pmin, pmax, ptype in P:
+    if ptype == 'v':
+        print(f"  {name} = {res.x[j]:.6f}")
+        j += 1
+print(f"\nFinal weighted MSE = {res.fun:.6f}")
+
+# --- Compute best-fit simulations ---
+bestP = {}
+j = 0
+for name, init, pmin, pmax, ptype in P:
+    if ptype == 'v':
+        bestP[name] = res.x[j]
+        j += 1
+    else:
+        bestP[name] = init
+
+fouts_best = []
+for ci in cilist:
+    kwargs = bestP.copy()
+    kwargs.update({'ci': ci, 'tmax': tmax, 'delta_t': delta_t, 'navgs': navgs})
+    _, fout = getfout(**kwargs)
+    fouts_best.append(fout)
+
+# --- Plot results (same as original code) ---
+ms = ['o', 'x', 's']
+cs = ['blue', 'orange', 'green']
+for i in range(3):
+    plt.plot(filist, d1.iloc[:, i], marker=ms[i], color=cs[i], label=f"Data {i+1}")
+    plt.plot(filist, fouts_best[i], marker=ms[i], linestyle='--', color=cs[i], label=f"Fit {i+1}")
+plt.xlabel('Inhibitory neuron frequency')
+plt.ylabel('Mean firing rate')
+plt.legend()
+plt.show()
