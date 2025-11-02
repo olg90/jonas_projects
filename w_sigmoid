@@ -1,0 +1,307 @@
+#%% Define the functions for fitting
+
+# KLVT channels reduce the excitability of the postsynaptic neuron
+# Hyperpolarization increases the excitability of the postsynaptic neuron
+
+import numpy as np
+from matplotlib.pyplot import plot as pt
+import matplotlib.pyplot as plt
+from numpy.random import exponential, binomial, gamma
+from numpy import exp
+from numpy import sqrt as Sqrt
+from numpy import log as Log
+import pandas as pd
+
+def simulate(vth, c, ci, f, fi, pr, pri, M, Mi, wmax, whyp, wpol,
+             tauw, wrate, tauv, tmax, delta_t, navgs):
+    
+    tavgs=[]
+    cavgs=[]
+
+    for _ in range(navgs):
+
+        vlist=[]
+        wlist=[]
+        tlist=[]
+        prelist=[]
+        postlist=[]
+        
+        tcurr=0
+        ratio = 0.3 #.3
+        timer = delta_t
+        e=1e-6
+        v=0
+        w=wpol
+        while tcurr < tmax:
+            t0=exponential(1/(f+e)) # action potential
+            t1=exponential(1/(fi+e))
+            t2 = timer
+
+            if t0 < t1 and t0 < t2: # AP occurrs
+                b = binomial(M, pr)
+                v=v+c*w*b
+                tmin = t0
+                timer-=tmin
+                prelist.append(tcurr+tmin)
+    
+            elif t1<t0 and t1<t2: # an inhibition event occurs
+
+                bi = binomial(Mi, pri)
+                v=v-ci*bi
+                tmin = t1
+                timer-=tmin
+
+            else:
+                tmin=t2
+                timer = delta_t
+                if tcurr >= ratio*tmax:
+                    vlist.append(v)
+                    wlist.append(w)
+                    tlist.append(tcurr)
+                    
+            tcurr += tmin
+            if v>=vth:
+                postlist.append(tcurr)
+                v=0
+                if len(vlist)>0:
+                    vlist[-1]=vth+0.01
+
+            # Update the continuous dynamics
+
+            v += (-v / tauv) * tmin
+            w += (wmax(v, wpol, whyp, wrate, vmax)-w)/tauw*tmin
+    
+        Tlist = np.diff(postlist)
+        Tmean = np.mean(Tlist)
+        CVT2=np.var(Tlist)/Tmean**2
+
+        tavgs.append(Tmean)
+        cavgs.append(CVT2)
+    Tmean = np.mean(tavgs)
+    CVT2 = np.mean(cavgs)
+    return tlist, vlist, wlist, prelist, postlist, Tmean, CVT2
+
+# =============================================================================
+# def wmax(v, whyp, wpol):
+#     if v<0:
+#         return whyp
+#     else:
+#         return wpol
+# =============================================================================
+
+def wmax(v, wpol, whyp, wrate, vmax):
+    return whyp + (wpol - whyp) / (1 + np.exp(-wrate * (v - vmax)))
+
+def getfout(nexc, nexcnum, filist, vth, c, ci, f, fi, pr, pri, M, Mi, wmax, whyp, wpol, vmax, wrate, tauw, tauv, tmax, delta_t, navgs):
+    foutlist=[]
+    for i,fi in enumerate(filist):
+        # print(i, len(filist))
+        res=simulate(vth, c, ci, f, fi, pr, pri, M, Mi, wmax, whyp, wpol, wrate, tauw, tauv, tmax, delta_t, navgs)
+        foutlist.append(1/res[5])
+    return foutlist
+# --------------------------------------------------------------------
+
+# Load the entire Excel file
+file_path = r"C:\Users\ogamb\OneDrive\Desktop\Research\current_project\postinhibitory_facilitation\allcellscopy.xlsx"  # Change this to your actual path
+# Read all data into a dictionary
+data = pd.read_excel(file_path, sheet_name=None, header=None)
+# # Print all sheet names
+# print("data found:", list(data.keys()))
+# # Loop through data and preview first few rows
+# for sheet_name, df in data.items():
+#     print(f"\n--- Sheet: {sheet_name} ---")
+
+names = ['Summary', '240425_E4', '240425_E5', '240425_E6', 
+         '240426_E2', '240426_E3', '240426_E5', '240515_E2', 
+         '240516_E2', '240516_E7']
+d=data[names[0]]
+# rates = d.iloc[:, 0][:8]
+excnum=2 # #0=exc weight 10, #1=exc weight 4, #2=exc weight 1 <------------------
+d1=d.iloc[1:, -3:][7*excnum:7*(excnum+1)] # Mean sustained rate
+# susrates=[d.iloc[1:, -3:][7*i:7*(i+1)] for i in range(3)]
+# plt.plot(rates, d1.iloc[:,2], marker='o') # 0 = 8 nS/input, 1 = 4 nS/input, 2 = 2 nS/input 
+# 0 = 8 nS/input, 1 = 4 nS/input, 2 = 2 nS/input
+estrengths=[10,4,1]
+istrengths=[8,4,2]
+# -----------------------------------------------------------------------------
+nexcnum=2-excnum # 0-1nS, 1-4nS, 2-10nS
+nexc=[400,40,4]
+
+f=300 # 300 # excitatory frequency, 40 excitatory neurons
+fi=0
+pr=0.2
+pri=0.2
+M=100
+Mi=100
+c=0.0002
+
+cinum=0
+# syn weight=8, =4, =2
+cilist=[0.0002, 0.6, 0.1]
+
+whyp=10
+wpol=1
+vmax=-0.01
+wrate=500
+tauw=0.01
+
+tauv=0.005
+vth=0.02 # Threshold value
+
+tmax = 10 # <-------------- TMAX
+delta_t = 1e-4
+navgs = 1
+
+ttype=1 # <-- test number
+
+# =============================================================================
+# # Test plot of vmem and w ----------------------------------------------------
+# plt.subplot(2,1,1)
+# tlist, vlist, wlist, prelist, postlist, Tmean, CVT2 = \
+#     simulate(vth, c, cilist[cinum], f, fi, pr, pri, M, Mi, wmax, whyp, wpol, tauw, wrate, tauv, tmax, delta_t, navgs)
+# plt.plot(tlist, vlist, label=r'$v_m$')
+# plt.plot(tlist, vth*np.ones(len(tlist)), label='vth', color='k')
+# plt.plot(tlist, 0*np.ones(len(tlist)), label='v0', color='gray', linestyle='--')
+# # =============================================================================
+# # plt.plot(tlist, vmax*np.ones(len(tlist)), label='vmax', linestyle=':', color='r')
+# # =============================================================================
+# plt.legend(loc='upper right')
+# plt.ylabel('Volts')
+# plt.xticks([])
+# plt.subplot(2,1,2)
+# plt.plot(tlist, wlist, label='w')
+# plt.xlabel('Time')
+# plt.ylabel('KLVT reduction strength')
+# plt.legend(loc='upper right')
+# plt.show()
+# print(1/Tmean)
+# #%%
+# =============================================================================
+
+fs=15
+cs = [
+    "#1f77b4",  # blue
+    "#ff7f0e",  # orange
+    "#2ca02c",  # green
+]
+
+if ttype==1:
+    # Testing one at a time
+    filist=[0,50,100,150,200,250,300]
+    fout = getfout(nexc, nexcnum, filist, vth, c, cilist[cinum], 
+                   f, fi, pr, pri, M, Mi, wmax, whyp, wpol, vmax, 
+                   wrate, tauw, tauv, tmax, delta_t, navgs)
+    plt.plot(filist, fout, color='k', marker='o')
+    for i in range(3):
+        plt.plot(filist, d1.iloc[:,i], marker='o', 
+                 label='exc={}, inh={}'.format(estrengths[excnum], istrengths[i]),
+                 color=cs[i])
+    plt.ylabel('Steady state mean firing rate', fontsize=fs)
+    plt.xlabel('Inhibitory neuron frequency', fontsize=fs)
+    plt.tick_params(axis='both', labelsize=fs)
+    plt.legend(fontsize=fs-3)
+    plt.show()
+
+if ttype==10:
+    # Plot all three
+    filist=filist=[0,50,100,150,200,250,300]
+    fouts=[getfout(nexc, nexcnum, filist, vth, c, cilist[cinum], f, fi, pr, 
+                   pri, M, Mi, wmax, whyp, wpol, vmax, tauw, tauv, tmax, delta_t, navgs)
+           for ci in cilist]
+    
+    for i in range(3):
+        if i == 0:
+            add=3
+        else:
+            add=0
+        plt.plot(filist, np.array(fouts[i]), color=cs[i], 
+                    marker='o', linestyle='--',  markerfacecolor='none')
+        plt.plot(filist, d1.iloc[:,i], marker='o', 
+                 label='exc={}, inh={}'.format(estrengths[excnum], istrengths[i]),
+                 color=cs[i])
+        # legend for simulations
+        if i==2:
+            plt.plot([], [], label='Simulations', color='k', markerfacecolor='none',
+                     marker='o', linestyle='--')
+    plt.ylabel('Steady state mean firing rate', fontsize=fs)
+    plt.xlabel('Inhibitory neuron frequency', fontsize=fs)
+    plt.tick_params(axis='both', labelsize=fs)
+    plt.legend(fontsize=fs-3)
+    plt.show()
+    
+#%%
+
+from scipy.optimize import minimize
+from tqdm import tqdm
+
+# --------------------------------------------------------------------
+# Define cost function for fitting the w parameters
+# --------------------------------------------------------------------
+def cost_wparams(P, d1, filist, nexc, nexcnum, vth, c, ci, f, fi,
+                 pr, pri, M, Mi, tauv, tmax, delta_t, navgs):
+
+    # Unpack parameters
+    whyp, wpol, vmax, wrate, tauw = P
+
+    # Compute simulated output (1/Tmean for each fi)
+    fout = getfout(
+        nexc, nexcnum, filist, vth, c, ci, f, fi, pr, pri, M, Mi,
+        wmax, whyp, wpol, vmax, wrate, tauw, tauv, tmax, delta_t, navgs
+    )
+
+    # Experimental data (column 0)
+    data = d1.iloc[:, 0].values.astype(float)
+
+    # Compute cost = summed squared error
+    cost = np.sum((np.array(fout) - data) ** 2)
+    return cost
+
+# --------------------------------------------------------------------
+# Initial guess and bounds
+# --------------------------------------------------------------------
+P0 = [10, 1, -0.01, 500, 0.01]   # [whyp, wpol, vmax, wrate, tauw]
+bounds = [(0.1, 20), (0.1, 5), (-0.05, 0.05), (10, 5000), (1e-4, 0.1)]
+
+filist = [0, 50, 100, 150, 200, 250, 300]
+
+# --------------------------------------------------------------------
+# Optimize using scipy.minimize
+# --------------------------------------------------------------------
+pbar = tqdm(total=100, desc="Optimizing w parameters", position=0)
+
+def callback(x):
+    pbar.update(1)
+
+res = minimize(
+    cost_wparams, P0,
+    args=(d1, filist, nexc, nexcnum, vth, c, cilist[cinum],
+          f, fi, pr, pri, M, Mi, tauv, tmax, delta_t, navgs),
+    bounds=bounds,
+    method='L-BFGS-B',
+    callback=callback
+)
+pbar.close()
+
+print("Optimization done!")
+print("Best parameters:")
+print(f"whyp={res.x[0]:.4f}, wpol={res.x[1]:.4f}, vmax={res.x[2]:.4f}, wrate={res.x[3]:.4f}, tauw={res.x[4]:.4f}")
+
+# --------------------------------------------------------------------
+# Plot best-fitting model vs data
+# --------------------------------------------------------------------
+bestP = res.x
+whyp, wpol, vmax, wrate, tauw = bestP
+fout_best = getfout(
+    nexc, nexcnum, filist, vth, c, cilist[cinum], f, fi, pr, pri,
+    M, Mi, wmax, whyp, wpol, vmax, wrate, tauw, tauv, tmax, delta_t, navgs
+)
+
+plt.figure(figsize=(7,5))
+plt.plot(filist, fout_best, 'k--o', label='Best-fit Simulation')
+plt.plot(filist, d1.iloc[:,0], 'ro-', label='Data (col 0)')
+plt.xlabel('Inhibitory frequency (Hz)')
+plt.ylabel('Steady-state firing rate (Hz)')
+plt.legend()
+plt.grid(True, linestyle='--', alpha=0.5)
+plt.title('Fit of wmax parameters to dataset 0')
+plt.show()
